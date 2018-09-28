@@ -29,21 +29,21 @@ for i in range(data_len):
 
 	if (i<9):
 		k = i+1
-		img_filename = "/Users/sachin007/Desktop/BTP_data/SachinGT/NYU_Database/S/I00%i.png"%k
+		img_filename = "/Users/sachin007/Desktop/BTP_data/SachinGT/NYU_Database/M/I00%i.png"%k
 	else:
 		k = i+1
-		img_filename = "/Users/sachin007/Desktop/BTP_data/SachinGT/NYU_Database/S/I0%i.png"%k
+		img_filename = "/Users/sachin007/Desktop/BTP_data/SachinGT/NYU_Database/M/I0%i.png"%k
 
 	
-	orig_img = Image.open(img_filename)
+	orig_img = cv.imread(img_filename)
 	orig_img = np.array(orig_img)
 
 	if (i<9):
 		k = i+1
-		mat_filename = "/Users/sachin007/Desktop/BTP_data/SachinGT/NYU_Database/S/I00%i.mat"%k
+		mat_filename = "/Users/sachin007/Desktop/BTP_data/SachinGT/NYU_Database/M/I00%i.mat"%k
 	else:
 		k = i+1
-		mat_filename = "/Users/sachin007/Desktop/BTP_data/SachinGT/NYU_Database/S/I0%i.mat"%k
+		mat_filename = "/Users/sachin007/Desktop/BTP_data/SachinGT/NYU_Database/M/I0%i.mat"%k
 
 	mat = sc.loadmat(mat_filename)
 	sym_data = mat['segments']
@@ -52,6 +52,7 @@ for i in range(data_len):
 	numb_axis = s[1]		#number of symmetry axis 
 
 	sym_img = np.zeros(np.shape(orig_img), np.uint8)
+
 
 
 	for j in range(numb_axis):
@@ -71,7 +72,7 @@ for i in range(data_len):
 	out_img = np.concatenate((orig_img, sym_img), axis=1)
 	# out_img = Image.fromarray(out_img)
 	# out_img = out_img.convert('RGB')
-	filename = "/Users/sachin007/Desktop/BTP_data/SachinGT/combined_NYU_S/img_%i.jpg"%i
+	filename = "/Users/sachin007/Desktop/BTP_data/SachinGT/combined/combined_NYU_M/img_NYUM_%i.jpg"%i
 	cv.imwrite(filename,out_img)
 	print(i)
 	# img.show()
