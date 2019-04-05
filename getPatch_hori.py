@@ -24,35 +24,41 @@ def subimage(image, center, theta, width, height):
    return image
 
 hog = cv2.HOGDescriptor()
-im = cv2.imread("/Users/sachin007/Desktop/pix2pix_train/sym_test/images/joined/testd22-joined.png")
-row,col,chan = np.shape(im)
-min_i = 1000;
-max_i = 0;
+im = cv2.imread("/Users/sachin007/Desktop/BTP_data/patch.jpg")
+# im = cv2.imread("/Users/sachin007/Desktop/pix2pix_train/sym_test/images/joined/testd33-joined.png")
+# rows,cols,chan = im.shape
+# M = cv2.getRotationMatrix2D((cols/2,rows/2),-30,1)
+# dst = cv2.warpAffine(im,M,(cols,rows))
+# cv2.imwrite("rotated_sample.png",dst)
 
-j = 100
-for i in range(50,140):
+# row,col,chan = np.shape(im)
+min_j = 1000;
+max_j = 0;
+
+i = 130
+for j in range(100,180):
 	if (np.all(im[i,j,:])==np.all((0,0,1))):
-		print(i)
-		if (i<min_i):
-			min_i = i
-		if(i>max_i):
-			max_i = i
+		print(j)
+		if (j<min_j):
+			min_j = j
+		if(j>max_j):
+			max_j = j
 
-mid_i = int((min_i+max_i)/2)
-print("mid",mid_i)
+mid_j = int((min_j+max_j)/2) + 50
+print("mid",mid_j)
 
 #take a 20 20 patch near the symmetry axis 
 
-# patch1 = im[i-25:i+25,mid_i-50:mid_i,:]
-# patch2 = im[i-25:i+25,mid_i:mid_i+50,:]
-# print(np.shape(patch1))
+patch1 = im[i-25:i+25,mid_j-50:mid_j,:]
+patch2 = im[i-25:i+25,mid_j:mid_j+50,:]
+print(np.shape(patch1))
 
 # cv2.imshow('Image1',patch1)
 # cv2.imshow('Image2',patch2)
 # patch1 = Image.fromarray(patch1, 'RGB')
 # patch2 = Image.fromarray(patch2, 'RGB')
-# cv2.imwrite("patch1.png",patch1)
-# cv2.imwrite("patch2.png",patch2)
+cv2.imwrite("patch1.png",patch1)
+cv2.imwrite("patch2.png",patch2)
 # p1 = cv2.imread("patch1.png")
 # p2 = cv2.imread("patch2.png")
 
@@ -61,22 +67,22 @@ print("mid",mid_i)
 # im_cropped = im[10:50,10:50,:]
 # kp, des = orb.detectAndCompute(im_cropped,None)
 
-#calculating the correlation 
-# sigma1 = np.var(patch1)
-# sigma2 = np.var(patch2)
-# mean1 = np.mean(patch1)
-# mean2 = np.mean(patch2)
+# calculating the correlation 
+sigma1 = np.var(patch1)
+sigma2 = np.var(patch2)
+mean1 = np.mean(patch1)
+mean2 = np.mean(patch2)
 
-# row,col,chan = np.shape(patch1)
+row,col,chan = np.shape(patch1)
 
-# corr=0.0
-# for m in range(row):
-# 	for n in range(col):
-# 		for k in range(3):
-# 			corr = corr + (patch1[m,n,k]-mean1)*(patch2[m,col-n-1,k] - mean2)
-
-# corr = corr/(3*sigma1*sigma2)
-# print(corr)
+corr=0.0
+for m in range(row):
+	for n in range(col):
+		for k in range(3):
+			corr = corr + (patch1[m,n,k]-mean1)*(patch2[m,col-n-1,k] - mean2)
+			# corr = corr + patch1[m,n,k] - patch2[m,col-n-1,k]
+corr = corr/(3*sigma1*sigma2)
+print(corr)
 
 # self_corr=0.0
 # for m in range(row):
@@ -108,8 +114,8 @@ print("mid",mid_i)
 # cv2.imwrite('houghlines.jpg',im)
 
 
-image = subimage(im, center=( j,mid_i), theta=90, width=50, height=50)
-cv2.imwrite('patch.jpg', image)
+# image = subimage(im, center=( 128,128), theta=-60, width=50, height=50)
+# cv2.imwrite('patch.jpg', image)
 
 
 # pdb.set_trace()

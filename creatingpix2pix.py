@@ -10,7 +10,7 @@ from PIL import Image
 
 for img in glob.glob("/Users/sachin007/Desktop/BTP_data/SachinGT/*.jpg"):
 
-	print(img)
+	# print(img)
 	img1 = cv.imread(img,1)
 	# import pdb;pdb.set_trace()
 	img2 = cv.imread('/Users/sachin007/Desktop/BTP_data/SachinGT/images/COCO_test2014_000000008754.jpg',1)

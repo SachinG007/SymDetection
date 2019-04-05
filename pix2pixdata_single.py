@@ -7,32 +7,32 @@ import os
 
 orig_img_list = []
 sym_data_list = []
-data_len = 99
+data_len = 96
 # dataDir = "/Users/sachin007/Desktop/BTP_data/SachinGT/NYU_Database/M_mat_files/"
-lineThickness = 5
+lineThickness = 3
 
 
 # import pdb;pdb.set_trace()
 
-# mat = sc.loadmat('/Users/sachin007/Desktop/BTP_data/SachinGT/single/label_refs.mat')
-# sym_data = mat['lbl']
+mat = sc.loadmat('/Users/sachin007/Desktop/BTP_data/SachinGT/single/label_refs.mat')
+sym_data = mat['lbl']
 
-filename = '/Users/sachin007/Desktop/BTP_data/SachinGT/ref_s/label_refs.txt'
-sym_data = np.loadtxt(filename, delimiter=',')
+# filename = '/Users/sachin007/Desktop/BTP_data/SachinGT/ref_s/label_refs.txt'
+# sym_data = np.loadtxt(filename, delimiter=',')
 
 
-# for i in range(data_len):
-for i in range(1):
+for i in range(data_len):
+# for i in range(1):
 
-	i =99;
+	# i =99;
 
-	# if (i<9):
-	# 	k = i+1
-	# 	img_filename = "/Users/sachin007/Desktop/BTP_data/SachinGT/ref_s/refs_00%i.jpg"%k
-	# else:
-	# 	k = i+1
-	# 	img_filename = "/Users/sachin007/Desktop/BTP_data/SachinGT/ref_s/refs_0%i.jpg"%k
-	img_filename = "/Users/sachin007/Desktop/BTP_data/SachinGT/ref_s/refs_100.jpg"
+	if (i<9):
+		k = i+1
+		img_filename = "/Users/sachin007/Desktop/BTP_data/SachinGT/single/refs_00%i.jpg"%k
+	else:
+		k = i+1
+		img_filename = "/Users/sachin007/Desktop/BTP_data/SachinGT/single/refs_0%i.jpg"%k
+	# img_filename = "/Users/sachin007/Desktop/BTP_data/SachinGT/ref_s/refs_100.jpg"
 
 	
 	orig_img = cv.imread(img_filename)
@@ -57,12 +57,12 @@ for i in range(1):
 
 		cv.line(sym_img, (x1, y1), (x2, y2), (255,255,255), lineThickness)
 
-
+	sym_img = cv.GaussianBlur(sym_img,(3,3),10)
 	out_img = np.concatenate((orig_img, sym_img), axis=1)
 	# out_img = Image.fromarray(out_img)
 	# out_img = out_img.convert('RGB')
-	# filename = "/Users/sachin007/Desktop/BTP_data/SachinGT/combined/combined_ref_s/img_refs_%i.jpg"%i
-	filename = "/Users/sachin007/Desktop/img_refs_%i.jpg"%i
+	filename = "/Users/sachin007/Desktop/BTP_data/SachinGT/combined/combined_single/img_single_%i.jpg"%i
+	# filename = "/Users/sachin007/Desktop/img_refs_%i.jpg"%i
 	cv.imwrite(filename,out_img)
 	# import pdb;pdb.set_trace()
 	print(i)
