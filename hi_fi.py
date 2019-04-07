@@ -16,7 +16,7 @@ import cv2
 
 #data parallel
 # gpu = 0
-os.environ["CUDA_VISIBLE_DEVICES"]="0"
+os.environ["CUDA_VISIBLE_DEVICES"]="0,1"
 # available_devices = os.environ['CUDA_VISIBLE_DEVICES'].split(',')
 # os.environ['CUDA_VISIBLE_DEVICES'] = available_devices[gpu]
 
@@ -119,6 +119,12 @@ def gen_conv(batch_input, out_channels):
     return tf.layers.max_pooling2d(temp_out, 2,2) 
     # return = tf.nn.atrous_conv2d(batch_input, kernel, padding='SAME', rate=2)
 
+def gen_conv_samesize(batch_input, out_channels):
+
+    initializer = tf.random_normal_initializer(0, 0.02)
+    temp_out = tf.layers.conv2d(batch_input, out_channels, kernel_size=4, strides=(1, 1), padding="same", kernel_initializer=initializer)
+
+    return tf.tanh(temp_out)
 
 def gen_deconv(batch_input, out_channels):
     # [batch, in_height, in_width, in_channels] => [batch, out_height, out_width, out_channels]
@@ -399,16 +405,27 @@ def create_generator(generator_inputs, generator_outputs_channels):
                     output = tf.nn.dropout(output, keep_prob=1 - dropout)
 
                 if decoder_layer == 4:
-                    side_output_4 = output[:,:,:,a.ngf*4-3:a.ngf*4]
-                    # side_output_4_r = tf.image.resize_images(side_output_4, size=size, method=tf.image.ResizeMethod.BICUBIC)
+                    output_32 = output[:,:,:,:]
+                    output_32_conv = gen_conv_samesize(output_32,a.ngf*2)
+                    # size_64 = [64, int(round(64 * a.aspect_ratio))]
+                    # output_32_conv_64 = tf.image.resize_images(output_32_conv, size= size_64, method=tf.image.ResizeMethod.BICUBIC)
+                    output_32_conv_64 = gen_deconv(output_32, a.ngf*2)
 
                 if decoder_layer == 5:
-                    side_output_5 = output[:,:,:,a.ngf*2-3:a.ngf*2]
-                    # side_output_5_r = tf.image.resize_images(side_output_5, size=size, method=tf.image.ResizeMethod.BICUBIC)
+                    output_64 = output[:,:,:,:]
+                    output_64_conv1 = gen_conv_samesize(output_64,a.ngf*2)
+                    # output_64_conv2 = gen_conv_samesize(output_64,a.ngf)
+                    # size_128 = [128, int(round(128 * a.aspect_ratio))]
+                    # output_64_conv_128 = tf.image.resize_images(output_64_conv2, size= size_128, method=tf.image.ResizeMethod.BICUBIC)
+                    output_64_conv_128 = gen_deconv(output_64, a.ngf)
 
                 if decoder_layer == 6:
-                    side_output_6 = output[:,:,:,a.ngf - 3:a.ngf]
-                    # side_output_6_r = tf.image.resize_images(side_output_6, size=size, method=tf.image.ResizeMethod.BICUBIC)
+                    output_128 = output[:,:,:,:]
+                    output_128_conv1 = gen_conv_samesize(output_128,a.ngf)
+                    # output_128_conv2 = gen_conv_samesize(output_128,generator_outputs_channels)
+                    # size_256 = [256, int(round(256 * a.aspect_ratio))]
+                    # output_128_conv_256 = tf.image.resize_images(output_128_conv2, size= size_256, method=tf.image.ResizeMethod.BICUBIC)
+                    output_128_conv_256 = gen_deconv(output_128, generator_outputs_channels)
 
                 layers.append(output)
 
@@ -420,7 +437,39 @@ def create_generator(generator_inputs, generator_outputs_channels):
             output = tf.tanh(output)
             layers.append(output)
 
-        return layers[-1], side_output_4, side_output_5, side_output_6
+            output_256_conv = gen_conv_samesize(output,generator_outputs_channels)
+
+        
+
+    with tf.device('/gpu:1'):
+
+        # # SIDE OUTPUT NETWORKS
+        sro_64 = tf.add(output_32_conv_64,output_64_conv1)
+        # sro_64_conv = gen_conv_samesize(sro_64,generator_outputs_channels)
+        # sro_64_conv_128 = tf.image.resize_images(sro_64_conv, size= size_128, method=tf.image.ResizeMethod.BICUBIC)
+        sro_64_conv_128 = gen_deconv(sro_64, generator_outputs_channels)
+
+        sro_128 = tf.add(output_64_conv_128,output_128_conv1)
+        sro_128_conv = gen_conv_samesize(sro_128,generator_outputs_channels) 
+        # sro_128_conv_256 = tf.image.resize_images(sro_128_conv, size= size_256, method=tf.image.ResizeMethod.BICUBIC)       
+        sro_128_conv_256 = gen_deconv(sro_128, generator_outputs_channels)
+
+        sro_256 = tf.add(output_128_conv_256,output_256_conv)
+        sro_256_conv = gen_conv_samesize(sro_256,generator_outputs_channels)    
+
+        sec_last_128 = tf.add(sro_64_conv_128,sro_128_conv)
+        # sec_last_128_conv = gen_conv_samesize(sec_last_128,generator_outputs_channels)
+        # sec_last_128_conv_256 = tf.image.resize_images(sec_last_128_conv, size= size_256, method=tf.image.ResizeMethod.BICUBIC)
+        sec_last_128_conv_256 = gen_deconv(sec_last_128, generator_outputs_channels)
+
+        sec_last_256 = tf.add(sro_128_conv_256,sro_256_conv)    
+        sec_last_256_conv = gen_conv_samesize(sec_last_256,generator_outputs_channels)
+
+
+        add_output = tf.add(sec_last_128_conv_256,sec_last_256_conv)
+        final_output = gen_conv_samesize(add_output,generator_outputs_channels)
+
+        return final_output
 
 
 def create_model(inputs, targets):
@@ -437,12 +486,12 @@ def create_model(inputs, targets):
 
         with tf.variable_scope("generator"):
             out_channels = int(targets.get_shape()[-1])
-            outputs, n_by_8, n_by_4, n_by_2 = create_generator(inputs, out_channels)
+            outputs = create_generator(inputs, out_channels)
 
         with tf.name_scope("generator_loss"):
             # predict_fake => 1
             # abs(targets - outputs) => 0
-            gen_loss_L1 = tf.reduce_mean(tf.abs(targets - outputs)) + tf.reduce_mean(tf.abs(targets_by_8 - n_by_8)) + tf.reduce_mean(tf.abs(targets_by_4 - n_by_4)) + tf.reduce_mean(tf.abs(targets_by_2 - n_by_2))
+            gen_loss_L1 = tf.reduce_mean(tf.abs(targets - outputs)) 
             gen_loss = gen_loss_L1 * a.l1_weight
 
         with tf.name_scope("generator_train"):
@@ -594,7 +643,6 @@ def main():
         restore_saver = tf.train.Saver()
         export_saver = tf.train.Saver()
 
-        config = tf.ConfigProto(allow_soft_placement = True)
         with tf.Session() as sess:
             sess.run(init_op)
             print("loading model from checkpoint")
@@ -676,8 +724,8 @@ def main():
         tf.summary.histogram(var.op.name + "/values", var)
 
     # for grad, var in model.gen_grads_and_vars:
-    for grad, var in model.gen_grads_and_vars:
-        tf.summary.histogram(var.op.name + "/gradients", grad)
+    # for grad, var in model.gen_grads_and_vars:
+    #     tf.summary.histogram(var.op.name + "/gradients", grad)
 
     with tf.name_scope("parameter_count"):
         parameter_count = tf.reduce_sum([tf.reduce_prod(tf.shape(v)) for v in tf.trainable_variables()])
