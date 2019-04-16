@@ -14,9 +14,15 @@ import math
 import time
 import cv2
 
+import scipy.io as sc
+from scipy import misc
+import os
+import scipy
+# from skimage.transform import radon
+
 #data parallel
 # gpu = 0
-os.environ["CUDA_VISIBLE_DEVICES"]="1"
+os.environ["CUDA_VISIBLE_DEVICES"]="0"
 # available_devices = os.environ['CUDA_VISIBLE_DEVICES'].split(',')
 # os.environ['CUDA_VISIBLE_DEVICES'] = available_devices[gpu]
 
@@ -60,9 +66,10 @@ CROP_SIZE = 256
 CROP_SIZE8 = 32
 CROP_SIZE4 = 64
 CROP_SIZE2 = 128
+theta = np.linspace(0., 180., 256, endpoint=False)
 
 Examples = collections.namedtuple("Examples", "paths, inputs, targets, count, steps_per_epoch")
-Model = collections.namedtuple("Model", "outputs, gen_loss_L1, gen_grads_and_vars, train")
+Model = collections.namedtuple("Model", "outputs, gen_loss_L1, gen_grads_and_vars, img_axis, train")
 
 
 def preprocess(image):
@@ -132,9 +139,9 @@ def gen_deconv(batch_input, out_channels):
     if a.separable_conv:
         _b, h, w, _c = batch_input.shape
         resized_input = tf.image.resize_images(batch_input, [h * 2, w * 2], method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
-        return tf.nn.relu(tf.layers.separable_conv2d(resized_input, out_channels, kernel_size=4, strides=(1, 1), padding="same", depthwise_initializer=initializer, pointwise_initializer=initializer))
+        return tf.layers.separable_conv2d(resized_input, out_channels, kernel_size=4, strides=(1, 1), padding="same", depthwise_initializer=initializer, pointwise_initializer=initializer)
     else:
-        return tf.nn.relu(tf.layers.conv2d_transpose(batch_input, out_channels, kernel_size=4, strides=(2, 2), padding="same", kernel_initializer=initializer))
+        return tf.layers.conv2d_transpose(batch_input, out_channels, kernel_size=4, strides=(2, 2), padding="same", kernel_initializer=initializer)
 
 def lrelu(x, a):
     with tf.name_scope("lrelu"):
@@ -344,84 +351,139 @@ def load_examples():
 
 
 def create_generator(generator_inputs, generator_outputs_channels):
-    # layers = []
+    layers = []
     size = [CROP_SIZE, int(round(CROP_SIZE * a.aspect_ratio))]
 
     with tf.device('/gpu:0'):
 
-        with tf.variable_scope("conv1"): #256 * 256
-            conv1_1 = batchnorm(gen_conv_samesize(generator_inputs, a.ngf))
-            conv1_2 = batchnorm(gen_conv_samesize(conv1_1, a.ngf))
+        # encoder_1: [batch, 256, 256, in_channels] => [batch, 128, 128, ngf]
+        with tf.variable_scope("encoder_1"):
+            output = gen_conv(generator_inputs, a.ngf)
+            layers.append(output)
 
-        with tf.variable_scope("conv2"): #128 * 128
-            max_pool_2_1 = tf.layers.max_pooling2d(conv1_2, 2,2) 
-            conv2_1 = batchnorm(gen_conv_samesize(max_pool_2_1,a.ngf * 2))
-            conv2_2 = batchnorm(gen_conv_samesize(conv2_1,a.ngf * 2))
+        layer_specs = [
+            a.ngf * 2, # encoder_2: [batch, 128, 128, ngf] => [batch, 64, 64, ngf * 2]
+            a.ngf * 4, # encoder_3: [batch, 64, 64, ngf * 2] => [batch, 32, 32, ngf * 4]
+            a.ngf * 8, # encoder_4: [batch, 32, 32, ngf * 4] => [batch, 16, 16, ngf * 8]
+            a.ngf * 8, # encoder_5: [batch, 16, 16, ngf * 8] => [batch, 8, 8, ngf * 8]
+            a.ngf * 8, # encoder_6: [batch, 8, 8, ngf * 8] => [batch, 4, 4, ngf * 8]
+            a.ngf * 8, # encoder_7: [batch, 4, 4, ngf * 8] => [batch, 2, 2, ngf * 8]
+            a.ngf * 8, # encoder_8: [batch, 2, 2, ngf * 8] => [batch, 1, 1, ngf * 8]
+        ]
 
-        with tf.variable_scope("conv3"): #64 * 64
-            max_pool_3_1 = tf.layers.max_pooling2d(conv2_2, 2,2) 
-            conv3_1 = batchnorm(gen_conv_samesize(max_pool_3_1,a.ngf * 4))
-            conv3_2 = batchnorm(gen_conv_samesize(conv3_1,a.ngf * 4))
-            conv3_3 = batchnorm(gen_conv_samesize(conv3_2,a.ngf * 4))
+        for out_channels in layer_specs:
+            with tf.variable_scope("encoder_%d" % (len(layers) + 1)):
+                rectified = lrelu(layers[-1], 0.2)
+                # [batch, in_height, in_width, in_channels] => [batch, in_height/2, in_width/2, out_channels]
+                convolved = gen_conv(rectified, out_channels)
+                output = batchnorm(convolved)
+                layers.append(output)
+    
 
-        with tf.variable_scope("conv4"): #32 * 32
-            max_pool_4_1 = tf.layers.max_pooling2d(conv3_3, 2,2) 
-            conv4_1 = batchnorm(gen_conv_samesize(max_pool_4_1,a.ngf * 8))
-            conv4_2 = batchnorm(gen_conv_samesize(conv4_1,a.ngf * 8))
-            conv4_3 = batchnorm(gen_conv_samesize(conv4_2,a.ngf * 8))
+    with tf.device('/gpu:0'):
 
-        with tf.variable_scope("Side_Outputs"):
-            sro_1_2 = batchnorm(gen_conv_samesize(conv1_2,3))
-            
-            sro_2_2 = batchnorm(gen_conv_samesize(conv2_2,3))
-            sro_2_2_up = batchnorm(gen_deconv(conv2_2,3))
+        layer_specs = [
+            (a.ngf * 8, 0.5),   # decoder_8: [batch, 1, 1, ngf * 8] => [batch, 2, 2, ngf * 8 ]
+            (a.ngf * 8, 0.5),   # decoder_7: [batch, 2, 2, ngf * 8 * 2] => [batch, 4, 4, ngf * 8 ]
+            (a.ngf * 8, 0.5),   # decoder_6: [batch, 4, 4, ngf * 8 * 2] => [batch, 8, 8, ngf * 8 ]
+            (a.ngf * 8, 0.0),   # decoder_5: [batch, 8, 8, ngf * 8 * 2] => [batch, 16, 16, ngf * 8 ]
+            (a.ngf * 4, 0.0),   # decoder_4: [batch, 16, 16, ngf * 8 * 2] => [batch, 32, 32, ngf * 4 ]
+            (a.ngf * 2, 0.0),   # decoder_3: [batch, 32, 32, ngf * 4 * 2] => [batch, 64, 64, ngf * 2 ]
+            (a.ngf, 0.0),       # decoder_2: [batch, 64, 64, ngf * 2 * 2] => [batch, 128, 128, ngf]
+        ]
 
-            sro_3_3 = batchnorm(gen_conv_samesize(conv3_3,3))
-            sro_3_3_up = batchnorm(gen_deconv(conv3_3,3))
+        num_encoder_layers = len(layers)
+        for decoder_layer, (out_channels, dropout) in enumerate(layer_specs):
+            skip_layer = num_encoder_layers - decoder_layer - 1
+            with tf.variable_scope("decoder_%d" % (skip_layer + 1)):
+                if decoder_layer == 0:
+                    # first decoder layer doesn't have skip connections
+                    # since it is directly connected to the skip_layer
+                    input = layers[-1]
+                else:
+                    input = tf.concat([layers[-1], layers[skip_layer]], axis=3)
 
-            sro_4_3_up = batchnorm(gen_deconv(conv4_3,3))
+                rectified = tf.nn.relu(input)
+                # [batch, in_height, in_width, in_channels] => [batch, in_height*2, in_width*2, out_channels]
+                output = gen_deconv(rectified, out_channels)
+                output = batchnorm(output)
 
-            hier1_2 = tf.add(sro_1_2,sro_2_2_up) #256
-            hier2_3 = tf.add(sro_2_2,sro_3_3_up) #128
-            hier3_4 = tf.add(sro_3_3,sro_4_3_up) #64
+                if dropout > 0.0:
+                    output = tf.nn.dropout(output, keep_prob=1 - dropout)
 
-            conv_hier1_2 = batchnorm(gen_conv_samesize(hier1_2,3)) #256
-            conv_hier2_3_up = batchnorm(gen_deconv(hier2_3,3))     #256 
-            conv_hier2_3 = batchnorm(gen_conv_samesize(hier2_3,3)) #128
-            conv_hier3_4_up = batchnorm(gen_deconv(hier3_4,3))     #128          
+                layers.append(output)
 
-            semi_1 = tf.add(conv_hier1_2,conv_hier2_3_up) #256
-            semi_2 = tf.add(conv_hier2_3,conv_hier3_4_up) #128
+        # decoder_1: [batch, 128, 128, ngf * 2] => [batch, 256, 256, generator_outputs_channels]
+        with tf.variable_scope("decoder_1"):
+            input = tf.concat([layers[-1], layers[0]], axis=3)
+            rectified = tf.nn.relu(input)
+            output = gen_deconv(rectified, generator_outputs_channels)
+            output = tf.tanh(output)
+            layers.append(output)
 
-            conv_semi_1 = batchnorm(gen_conv_samesize(semi_1,3)) #256
-            conv_semi_2_up = batchnorm(gen_deconv(semi_2,3))  #256
+        last_out = layers[-1]
+        # return layers[-1]
 
-            final = tf.add(conv_semi_1,conv_semi_2_up)
-            final_output = batchnorm(gen_conv_samesize(final,3))
 
-        return final_output
+        #RADON CALCULATIONS
+        outputs = last_out
+        batch_sz = outputs.shape[0]
 
+        outputs_gray = tf.add(outputs[:,:,:,0],outputs[:,:,:,1])
+        outputs_gray = tf.add(outputs_gray,outputs[:,:,:,2])/3
+        outputs_gray = tf.expand_dims(outputs_gray,3)
+        print("Shape of outputs gray is **************************", np.shape(outputs_gray))
+        # batch_tensor_list = []
+        # for bt in range(batch_sz):
+        tensor_list = []
+
+        num_projections = 256
+        for itern in range(num_projections):
+            rotations = tf.contrib.image.rotate(outputs_gray, (itern/256)*np.pi,interpolation='NEAREST')
+            tensor_list.append(tf.reduce_sum(rotations,1))
+
+        sino = tf.stack(tensor_list,axis = 1)
+        aa = tf.reduce_max(sino,axis=3)
+        bb = tf.reduce_max(aa,axis=2)
+        cc = tf.reduce_max(bb,axis=1)
+        
+        norm_sino = []
+        for k in range(batch_sz):
+            norm_sino.append((sino[k,:,:,:]/cc[k]) * 255)
+
+        sino_norm = tf.stack(norm_sino, axis = 0)
+        print("Shape of sino norm is **************************", np.shape(sino_norm))
+        sinogram = tf.transpose(sino_norm,perm=[0,2,1,3])
+        print("Shape of Final Sinogram is **************************", np.shape(sinogram))
+        # import pdb; pdb.set_trace()
+
+        sinogram_conv = batchnorm(gen_conv_samesize(sinogram,1))
+
+        return sinogram_conv, last_out
 
 def create_model(inputs, targets):
-    
 
     with tf.device('/gpu:0'):
 
         with tf.variable_scope("generator"):
             out_channels = int(targets.get_shape()[-1])
-            outputs = create_generator(inputs, out_channels)
+            outputs,img_axis = create_generator(inputs, out_channels)
+                
 
         with tf.name_scope("generator_loss"):
             # predict_fake => 1
             # abs(targets - outputs) => 0
-            gen_loss_L1 = tf.reduce_mean(tf.abs(targets - outputs)) 
+            target_sing = tf.add(targets[:,:,:,0],targets[:,:,:,1])
+            target_sing = tf.add(target_sing,targets[:,:,:,2])/3
+            target_sing = tf.expand_dims(target_sing,3)
+            gen_loss_L1 = tf.reduce_mean(tf.abs(target_sing - outputs)) #+ tf.reduce_mean(tf.abs(targets_by_8 - n_by_8)) + tf.reduce_mean(tf.abs(targets_by_4 - n_by_4)) + tf.reduce_mean(tf.abs(targets_by_2 - n_by_2))
             gen_loss = gen_loss_L1 * a.l1_weight
 
         with tf.name_scope("generator_train"):
             # with tf.control_dependencies([discrim_train]):
             gen_tvars = [var for var in tf.trainable_variables() if var.name.startswith("generator")]
             gen_optim = tf.train.AdamOptimizer(a.lr, a.beta1)
-            gen_grads_and_vars = gen_optim.compute_gradients(gen_loss_L1, var_list=gen_tvars)
+            gen_grads_and_vars = gen_optim.compute_gradients(gen_loss, var_list=gen_tvars)
             gen_train = gen_optim.apply_gradients(gen_grads_and_vars)
 
     ema = tf.train.ExponentialMovingAverage(decay=0.99)
@@ -437,6 +499,7 @@ def create_model(inputs, targets):
         gen_loss_L1=ema.average(gen_loss_L1),
         gen_grads_and_vars=gen_grads_and_vars,
         outputs=outputs,
+        img_axis=img_axis,
         train=tf.group(update_losses, incr_global_step, gen_train),
     )
 
@@ -565,11 +628,8 @@ def main():
         init_op = tf.global_variables_initializer()
         restore_saver = tf.train.Saver()
         export_saver = tf.train.Saver()
-        
-        config = tf.ConfigProto(allow_soft_placement=True)
-        config.gpu_options.allocator_type = True
-        config.gpu_options.per_process_gpu_memory_fraction = 1
-        with tf.Session(config = config) as sess:
+
+        with tf.Session() as sess:
             sess.run(init_op)
             print("loading model from checkpoint")
             checkpoint = tf.train.latest_checkpoint(a.checkpoint)
@@ -593,6 +653,7 @@ def main():
             # need to augment targets and outputs with brightness
             targets = augment(examples.targets, examples.inputs)
             outputs = augment(model.outputs, examples.inputs)
+            img_axis = augment(model.img_axis, examples.inputs)
             # inputs can be deprocessed normally and handled as if they are single channel
             # grayscale images
             inputs = deprocess(examples.inputs)
@@ -601,12 +662,14 @@ def main():
             inputs = augment(examples.inputs, examples.targets)
             targets = deprocess(examples.targets)
             outputs = deprocess(model.outputs)
+            img_axis = deprocess(model.img_axis)
         else:
             raise Exception("invalid direction")
     else:
         inputs = deprocess(examples.inputs)
         targets = deprocess(examples.targets)
         outputs = deprocess(model.outputs)
+        img_axis = deprocess(model.img_axis)
 
     def convert(image):
         if a.aspect_ratio != 1.0:
@@ -626,12 +689,16 @@ def main():
     with tf.name_scope("convert_outputs"):
         converted_outputs = convert(outputs)
 
+    with tf.name_scope("convert_img_axis"):
+        converted_img_axis = convert(img_axis)
+
     with tf.name_scope("encode_images"):
         display_fetches = {
             "paths": examples.paths,
             "inputs": tf.map_fn(tf.image.encode_png, converted_inputs, dtype=tf.string, name="input_pngs"),
             "targets": tf.map_fn(tf.image.encode_png, converted_targets, dtype=tf.string, name="target_pngs"),
             "outputs": tf.map_fn(tf.image.encode_png, converted_outputs, dtype=tf.string, name="output_pngs"),
+            "img_axis": tf.map_fn(tf.image.encode_png, converted_img_axis, dtype=tf.string, name="img_axis_pngs"),
         }
 
     # summaries
@@ -643,6 +710,9 @@ def main():
 
     with tf.name_scope("outputs_summary"):
         tf.summary.image("outputs", converted_outputs)
+
+    with tf.name_scope("img_axis_summary"):
+        tf.summary.image("img_axis", converted_img_axis)
 
     tf.summary.scalar("generator_loss_L1", model.gen_loss_L1)
 
@@ -744,7 +814,7 @@ def main():
                     # print("discrim_loss", results["discrim_loss"])
                     # print("gen_loss_GAN", results["gen_loss_GAN"])
                     print("gen_loss_L1", results["gen_loss_L1"])
-                    with open('results_hifi.txt', 'a') as f:   
+                    with open('results_radon_embedded_15April.txt', 'a') as f:   
                         # for item in test_accs:
                         f.write("%s\n"%results["gen_loss_L1"])
 
