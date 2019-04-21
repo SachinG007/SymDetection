@@ -436,31 +436,45 @@ def create_generator(generator_inputs, generator_outputs_channels):
         with tf.variable_scope("decoder_1"):
             input = tf.concat([layers[-1], layers[0]], axis=3)
             rectified = tf.nn.relu(input)
-            output = gen_deconv(rectified, 3)
+            output = gen_deconv(rectified, generator_outputs_channels)
             output = tf.tanh(output)
-            out_g = tf.image.rgb_to_grayscale(output)
-            layers.append(out_g)
+            layers.append(output)
 
-           
+
+        # out_g_list = []
+        # for k in range(a.batch_size):
+        #     out_g_norm = tf.div(tf.subtract(output[k,:,:,:], tf.reduce_min(output[k,:,:,:])), tf.subtract(tf.reduce_max(output[k,:,:,:]), tf.reduce_min(output[k,:,:,:])))
+        #     out_g_list.append(out_g_norm)
+
+        # out_g_batch = tf.stack(out_g_list,axis=0)
+        # out_g_batch = out_g_batch * 2 - 1;
+        # print("Shape of img axis is **************************", np.shape(out_g_batch))
+
+        
+        
         tensor_list = []
         num_projections = 256
         for itern in range(num_projections):
-            rotations = tf.contrib.image.rotate(out_g, (itern/num_projections)*np.pi,interpolation='NEAREST')
-            tensor_list.append(tf.reduce_sum(rotations,1))  #each append 1 * 256 * 1        
+            rotations = tf.contrib.image.rotate(output, (itern/num_projections)*np.pi,interpolation='NEAREST')
+            tensor_list.append(tf.reduce_sum(rotations,1))  #each append batch * 256 * 1        
         
-        sino = tf.stack(tensor_list,axis = 1) #since axis is 1, 1*256*256*1
+        sino = tf.stack(tensor_list,axis = 1) #since axis is 1, batch*256*256*1
         sinogram = tf.transpose(sino,perm=[0,2,1,3])
 
-        sino_norm = tf.div(tf.subtract(sinogram, tf.reduce_min(sinogram)), tf.subtract(tf.reduce_max(sinogram), tf.reduce_min(sinogram)))
-        print("Shape of Final Sinogram is **************************", np.shape(sino_norm))
+        norm_list = []
+        for k in range(a.batch_size):        
+            sino_norm = tf.div(tf.subtract(sinogram[k,:,:,:], tf.reduce_min(sinogram[k,:,:,:])), tf.subtract(tf.reduce_max(sinogram[k,:,:,:]), tf.reduce_min(sinogram[k,:,:,:])))
+            print("Shape of Sinogram is ************", np.shape(sino_norm))
+            norm_list.append(sino_norm)
 
-        sino_norm = sino_norm * 2 - 1;
+        sino_norm_batch = tf.stack(norm_list,axis=0)
+
+        sino_norm_batch = sino_norm_batch * 2 - 1;
+        print("Shape of Final Sinogram is **************************", np.shape(sino_norm_batch))
         
-        out_g = tf.div(tf.subtract(out_g, tf.reduce_min(out_g)), tf.subtract(tf.reduce_max(out_g), tf.reduce_min(out_g)))
-        out_g = out_g * 2 - 1;
 
         # out_tensor_cat = tf.concat([sino_norm, out_g], 1)
-        return out_g,sino_norm
+        return sino_norm_batch,layers[-1]
         # return out_tensor_cat
 
 
@@ -481,10 +495,10 @@ def create_model(inputs, targets):
             # target_sing = tf.add(targets[:,:,:,0],targets[:,:,:,1])
             # target_sing = tf.add(target_sing,targets[:,:,:,2])/3
             # target_sing = tf.expand_dims(target_sing,3)
-            target_sing = tf.image.rgb_to_grayscale(targets)
+            # target_sing = tf.image.rgb_to_grayscale(targets)
             # import pdb;pdb.set_trace()
             # outputs_half = tf.split(outputs,2,axis=1,num=None,name='split')
-            gen_loss_L1 = tf.reduce_mean(tf.abs(target_sing - img_axis)) #+ tf.reduce_mean(tf.abs(targets_by_8 - n_by_8)) + tf.reduce_mean(tf.abs(targets_by_4 - n_by_4)) + tf.reduce_mean(tf.abs(targets_by_2 - n_by_2))
+            gen_loss_L1 = tf.reduce_mean(tf.abs(targets - outputs)) #+ tf.reduce_mean(tf.abs(targets_by_8 - n_by_8)) + tf.reduce_mean(tf.abs(targets_by_4 - n_by_4)) + tf.reduce_mean(tf.abs(targets_by_2 - n_by_2))
             gen_loss = gen_loss_L1 * a.l1_weight
 
         with tf.name_scope("generator_train"):
