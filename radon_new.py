@@ -461,20 +461,24 @@ def create_generator(generator_inputs, generator_outputs_channels):
         sino = tf.stack(tensor_list,axis = 1) #since axis is 1, batch*256*256*1
         sinogram = tf.transpose(sino,perm=[0,2,1,3])
 
-        norm_list = []
-        for k in range(a.batch_size):        
-            sino_norm = tf.div(tf.subtract(sinogram[k,:,:,:], tf.reduce_min(sinogram[k,:,:,:])), tf.subtract(tf.reduce_max(sinogram[k,:,:,:]), tf.reduce_min(sinogram[k,:,:,:])))
-            print("Shape of Sinogram is ************", np.shape(sino_norm))
-            norm_list.append(sino_norm)
+        sinogram_conv = gen_conv_samesize_norelu(sinogram,generator_outputs_channels)
+        sinogram_conv = tf.tanh(sinogram_conv)
 
-        sino_norm_batch = tf.stack(norm_list,axis=0)
 
-        sino_norm_batch = sino_norm_batch * 2 - 1;
-        print("Shape of Final Sinogram is **************************", np.shape(sino_norm_batch))
+        # norm_list = []
+        # for k in range(a.batch_size):        
+        #     sino_norm = tf.div(tf.subtract(sinogram[k,:,:,:], tf.reduce_min(sinogram[k,:,:,:])), tf.subtract(tf.reduce_max(sinogram[k,:,:,:]), tf.reduce_min(sinogram[k,:,:,:])))
+        #     print("Shape of Sinogram is ************", np.shape(sino_norm))
+        #     norm_list.append(sino_norm)
+
+        # sino_norm_batch = tf.stack(norm_list,axis=0)
+
+        # sino_norm_batch = sino_norm_batch * 2 - 1;
+        print("Shape of Final Sinogram is **************************", np.shape(sinogram_conv))
         
 
         # out_tensor_cat = tf.concat([sino_norm, out_g], 1)
-        return sino_norm_batch,layers[-1]
+        return sinogram_conv,layers[-1]
         # return out_tensor_cat
 
 
